@@ -1,0 +1,47 @@
+name: "NuGet Resilient Publish"
+description: "Publish NuGet packages with resilient retries."
+author: 'soenneker'
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+inputs:
+  api-key:
+    description: NuGet API key, including the NUGET_API_KEY output from nuget-resilient-login. Falls back to the NUGET_API_KEY environment variable.
+    required: false
+  packages:
+    description: Newline-separated file paths or positive glob patterns. Adjacent .snupkg files are included automatically.
+    default: artifacts/*.nupkg
+  source:
+    description: HTTPS NuGet V3 service index. Its advertised publishing endpoints receive the API key.
+    default: https://api.nuget.org/v3/index.json
+  include-symbols:
+    description: Publish selected and adjacent .snupkg files separately after package uploads.
+    default: 'true'
+  skip-duplicate:
+    description: Accept HTTP 409 as an existing package or symbols already processing.
+    default: 'true'
+  max-retries:
+    description: Additional attempts per request (0-10). Permanent errors are not retried.
+    default: '3'
+  timeout-seconds:
+    description: Full upload attempt timeout (1-1800 seconds), independent for each artifact. Index requests are capped at 30 seconds.
+    default: '600'
+  total-timeout-seconds:
+    description: Total action time budget including retries and waits (1-21600 seconds).
+    default: '3300'
+outputs:
+  results:
+    description: JSON array of file, kind, status, attempts, and optional error, including partial results on failure.
+  pushed:
+    description: Number of uploads accepted by the server; validation may still be pending.
+  duplicate:
+    description: Number of package uploads returning HTTP 409.
+  processing:
+    description: Number of symbol uploads returning HTTP 409 (already processing).
+  failed:
+    description: Number of failed artifacts.
+  skipped:
+    description: Number of artifacts not attempted because their parent failed or publishing stopped.
+runs:
+  using: node24
+  main: src/index.js

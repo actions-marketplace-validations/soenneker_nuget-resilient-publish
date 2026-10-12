@@ -1,0 +1,12 @@
+{
+  "name": "nuget-resilient-publish",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Publish NuGet packages with resilient retries.",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/action.js && node --check src/runtime.js && node --check src/settings.js && node --check src/files.js && node --check src/http.js && node --check src/transport.js && node --check src/multipart.js",
+    "test": "node --test"
+  }
+}
