@@ -49,3 +49,34 @@ test('invalid JSON fails without retry; service errors retry index discovery', a
   ctx.fetch = async () => new Response('not-json');
   await assert.rejects(request('https://feed.example', async () => ({}), ctx, { json: true }), /invalid JSON/);
 });
+
+test('permanent TLS, file, DNS and unknown errors fail without retries', async () => {
+  for (const code of ['CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID', 'ENOENT', 'EACCES', 'ENOTFOUND', 'ERR_INDEX_TOO_LARGE', 'UNKNOWN']) {
+    let calls = 0;
+    const ctx = context({ fetch: async () => { calls++; throw Object.assign(new Error('sensitive details'), { code }); } });
+    await assert.rejects(request('https://feed.example', async () => ({}), ctx), error => !error.message.includes('sensitive'));
+    assert.equal(calls, 1, code);
+  }
+});
+
+test('temporary network failures retry and preserve the safe error code', async () => {
+  for (const code of ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'EPIPE']) {
+    let calls = 0;
+    const ctx = context({ fetch: async () => { calls++; throw Object.assign(new Error('sensitive'), { code }); } });
+    await assert.rejects(request('https://feed.example', async () => ({}), ctx), new RegExp(code));
+    assert.equal(calls, 2);
+  }
+});
+
+test('symbol timeout is independent and timeout diagnostics identify the phase', async () => {
+  const ctx = context({ config: { retries: 0, timeout: 5, symbolTimeout: 100 }, fetch: (url, options) => new Promise((resolve, reject) => {
+    options.onPhase('response');
+    const timer = setTimeout(() => resolve(new Response(null, { status: 201 })), 30);
+    options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('timeout')); }, { once: true });
+  }) });
+  const symbol = { kind: 'symbols', attempts: 0 };
+  assert.equal(await request('https://feed.example', async () => ({}), ctx, { item: symbol }), 'pushed');
+  const pkg = { kind: 'package', attempts: 0 };
+  await assert.rejects(request('https://feed.example', async () => ({}), ctx, { item: pkg }), /response-timeout/);
+  assert.equal(pkg.attemptDetails[0].reason, 'response-timeout');
+});

@@ -17,6 +17,14 @@ inputs:
   include-symbols:
     description: Publish selected and adjacent .snupkg files separately after package uploads.
     default: 'true'
+  require-symbols:
+    description: Fail before uploading if any selected .nupkg lacks an adjacent .snupkg. Requires include-symbols.
+    default: 'false'
+  required-packages:
+    description: Newline-separated exact .nupkg filenames including versions that must be selected. Validates filenames, not embedded package metadata.
+  concurrency:
+    description: Maximum simultaneous artifact workers (1-4), sharing a throttling cooldown. All packages finish before symbols start.
+    default: '1'
   skip-duplicate:
     description: Accept HTTP 409 as an existing package or symbols already processing.
     default: 'true'
@@ -26,12 +34,18 @@ inputs:
   timeout-seconds:
     description: Full upload attempt timeout (1-1800 seconds), independent for each artifact. Index requests are capped at 30 seconds.
     default: '600'
+  symbol-timeout-seconds:
+    description: Full symbol upload attempt timeout (1-1800 seconds). Defaults to timeout-seconds.
   total-timeout-seconds:
     description: Total action time budget including retries and waits (1-21600 seconds).
     default: '3300'
 outputs:
   results:
-    description: JSON array of file, kind, status, attempts, and optional error, including partial results on failure.
+    description: Per-artifact JSON results with file, kind, status, sizeBytes, attempts, durationMs, last HTTP status/reason, attemptDetails, and optional error.
+  total:
+    description: Number of selected artifacts including symbols.
+  duration-seconds:
+    description: Batch elapsed seconds including preflight, uploads, retries, and waits, excluding final reporting.
   pushed:
     description: Number of uploads accepted by the server; validation may still be pending.
   duplicate:

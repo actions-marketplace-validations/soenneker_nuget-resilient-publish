@@ -29,14 +29,22 @@ function settings(env) {
   if (!apiKey || /[\r\n]/.test(apiKey)) throw new Error('Provide api-key or NUGET_API_KEY with a valid single-line API key.');
   try { validateHeaderValue('X-NuGet-ApiKey', apiKey); }
   catch { throw new Error('The API key contains invalid HTTP header characters.'); }
+  const timeout = integer(get('timeout-seconds'), 600, 1, 1800, 'timeout-seconds') * 1000;
+  const requireSymbols = boolean(get('require-symbols'), false, 'require-symbols');
+  const symbols = boolean(get('include-symbols'), true, 'include-symbols');
+  if (requireSymbols && !symbols) throw new Error('require-symbols cannot be true when include-symbols is false.');
   return {
     apiKey,
     patterns: (get('packages') || 'artifacts/*.nupkg').split(/\r?\n/).map(p => p.trim()).filter(Boolean),
     source: httpsUrl(get('source') || 'https://api.nuget.org/v3/index.json', 'source'),
-    symbols: boolean(get('include-symbols'), true, 'include-symbols'),
+    symbols,
+    requireSymbols,
+    requiredPackages: get('required-packages').split(/\r?\n/).map(p => p.trim()).filter(Boolean),
+    concurrency: integer(get('concurrency'), 1, 1, 4, 'concurrency'),
     skipDuplicate: boolean(get('skip-duplicate'), true, 'skip-duplicate'),
     retries: integer(get('max-retries'), 3, 0, 10, 'max-retries'),
-    timeout: integer(get('timeout-seconds'), 600, 1, 1800, 'timeout-seconds') * 1000,
+    timeout,
+    symbolTimeout: integer(get('symbol-timeout-seconds'), timeout / 1000, 1, 1800, 'symbol-timeout-seconds') * 1000,
     totalTimeout: integer(get('total-timeout-seconds'), 3300, 1, 21600, 'total-timeout-seconds') * 1000
   };
 }

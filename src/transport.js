@@ -11,6 +11,7 @@ function send(url, options) {
     const request = https.request(url, {
       method: options.method || 'GET', headers: options.headers, signal: options.signal
     }, response => {
+      options.onPhase?.('response');
       resolve({
         status: response.statusCode,
         ok: response.statusCode >= 200 && response.statusCode < 300,
@@ -23,7 +24,9 @@ function send(url, options) {
             length += chunk.length;
             if (length > 1024 * 1024) {
               response.destroy();
-              throw new Error('Service index exceeded the size limit.');
+              const error = new Error('Service index exceeded the size limit.');
+              error.code = 'ERR_INDEX_TOO_LARGE';
+              throw error;
             }
             chunks.push(chunk);
           }
@@ -32,6 +35,11 @@ function send(url, options) {
       });
     });
     request.on('error', reject);
+    request.on('socket', socket => {
+      if (socket.connecting) socket.once('secureConnect', () => options.onPhase?.('upload'));
+      else options.onPhase?.('upload');
+    });
+    request.on('finish', () => options.onPhase?.('response'));
     if (options.body) pipeline(Readable.from(options.body), request).catch(reject);
     else request.end();
   });

@@ -22,9 +22,10 @@ async function fixture(t, files = ['Example.1.0.0.nupkg', 'Example.1.0.0.snupkg'
   const delays = [];
   const masks = [];
   const bodies = [];
+  let clock = Date.now();
   const dependencies = {
     mask: value => masks.push(value), output: (name, value) => outputs[name] = value,
-    info: value => logs.push(value), sleep: async ms => delays.push(ms), random: () => 0,
+    info: value => logs.push(value), sleep: async ms => { delays.push(ms); clock += ms; }, now: () => clock, random: () => 0,
     fetch: async (url, options) => {
       calls.push({ url, options });
       if (!options.method) return Response.json(index);
@@ -52,7 +53,7 @@ function sequence(f, statuses) {
 
 test('symbol timeout retries only symbols and streams a fresh complete multipart body', async t => {
   const f = await fixture(t);
-  sequence(f, [201, new Error('socket reset secret-key'), 201]);
+  sequence(f, [201, Object.assign(new Error('socket reset secret-key'), { code: 'ECONNRESET' }), 201]);
   await run(f.env, f.dependencies);
   assert.deepEqual(f.calls.map(c => c.url), ['https://api.nuget.org/v3/index.json', 'https://feed.example/package', 'https://feed.example/symbols', 'https://feed.example/symbols']);
   assert.deepEqual(f.results().map(r => [r.status, r.attempts]), [['pushed', 1], ['pushed', 2]]);
@@ -69,7 +70,7 @@ test('symbol timeout retries only symbols and streams a fresh complete multipart
 
 test('ambiguous package timeout then duplicate still publishes symbols', async t => {
   const f = await fixture(t);
-  sequence(f, [new Error('lost response'), 409, 201]);
+  sequence(f, [Object.assign(new Error('lost response'), { code: 'ECONNRESET' }), 409, 201]);
   await run(f.env, f.dependencies);
   assert.deepEqual(f.results().map(r => r.status), ['duplicate', 'pushed']);
 });
@@ -238,4 +239,123 @@ test('response body and raw transport errors cannot disclose credentials in resu
   await assert.rejects(run(f.env, f.dependencies));
   assert.ok(!JSON.stringify(f.outputs).includes('secret-key'));
   assert.ok(!JSON.stringify(f.logs).includes('sensitive service response'));
+});
+
+test('required packages validate exact filenames and versions before network access', async t => {
+  const f = await fixture(t);
+  f.env['INPUT_REQUIRED-PACKAGES'] = 'Example.1.0.0.nupkg\nMissing.1.0.0.nupkg';
+  await assert.rejects(run(f.env, f.dependencies), /Required package is missing/);
+  assert.equal(f.calls.length, 0);
+  f.env['INPUT_REQUIRED-PACKAGES'] = 'Example.2.0.0.nupkg';
+  await assert.rejects(run(f.env, f.dependencies), /Required package is missing/);
+  f.env['INPUT_REQUIRED-PACKAGES'] = 'Example.1.0.0.nupkg';
+  await run(f.env, f.dependencies);
+  assert.equal(f.outputs.pushed, '2');
+});
+
+test('required symbols reject missing companions and contradictory settings before uploading', async t => {
+  const f = await fixture(t, ['Example.1.0.0.nupkg']);
+  f.env['INPUT_REQUIRE-SYMBOLS'] = 'true';
+  await assert.rejects(run(f.env, f.dependencies), /Required symbol companion/);
+  assert.equal(f.calls.length, 0);
+  f.env['INPUT_INCLUDE-SYMBOLS'] = 'false';
+  await assert.rejects(run(f.env, f.dependencies), /cannot be true/);
+});
+
+test('concurrent uploads respect their limit and package-before-symbol barrier', async t => {
+  const f = await fixture(t, ['A.nupkg', 'A.snupkg', 'B.nupkg', 'B.snupkg', 'C.nupkg']);
+  f.env.INPUT_CONCURRENCY = '2';
+  const original = f.dependencies.fetch;
+  let active = 0;
+  let peak = 0;
+  let finishedPackages = 0;
+  let startedUploads = 0;
+  let releasePair;
+  const firstPair = new Promise(resolve => { releasePair = resolve; });
+  f.dependencies.fetch = async (url, options) => {
+    if (!options.method) return original(url, options);
+    active++;
+    peak = Math.max(peak, active);
+    startedUploads++;
+    if (startedUploads === 2) releasePair();
+    if (startedUploads <= 2) await firstPair;
+    const response = await original(url, options);
+    if (url.endsWith('/symbols')) assert.equal(finishedPackages, 3);
+    await new Promise(resolve => setImmediate(resolve));
+    active--;
+    if (url.endsWith('/package')) finishedPackages++;
+    return response;
+  };
+  await run(f.env, f.dependencies);
+  assert.equal(peak, 2);
+  assert.equal(f.outputs.pushed, '5');
+  assert.equal(f.outputs.total, '5');
+  assert.ok(f.logs.some(line => line.includes('5/5 finished')));
+});
+
+test('fatal rejection stops new workers but awaits and records in-flight success', async t => {
+  const f = await fixture(t, ['A.nupkg', 'B.nupkg', 'C.nupkg']);
+  f.env.INPUT_CONCURRENCY = '2';
+  const original = f.dependencies.fetch;
+  let releaseB;
+  const gate = new Promise(resolve => { releaseB = resolve; });
+  let bStarted;
+  const ready = new Promise(resolve => { bStarted = resolve; });
+  f.dependencies.fetch = async (url, options) => {
+    const response = await original(url, options);
+    if (!options.method) return response;
+    if (f.bodies.at(-1).includes('bytes:A.nupkg')) {
+      await ready;
+      return new Response(null, { status: 403 });
+    }
+    bStarted();
+    await gate;
+    return response;
+  };
+  const promise = run(f.env, f.dependencies);
+  await ready;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.outputs.results, undefined);
+  releaseB();
+  await assert.rejects(promise, /HTTP 403/);
+  assert.deepEqual(f.results().map(r => r.status), ['failed', 'pushed', 'skipped']);
+  assert.equal(f.calls.length, 3);
+});
+
+test('reporting errors never replace primary failure and other outputs are still attempted', async t => {
+  const f = await fixture(t);
+  sequence(f, [401]);
+  const originalOutput = f.dependencies.output;
+  f.dependencies.output = (name, value) => {
+    if (name === 'results') throw new Error('secret-key output failure');
+    originalOutput(name, value);
+  };
+  f.dependencies.appendSummary = async () => { throw new Error('secret-key summary failure'); };
+  await assert.rejects(run(f.env, f.dependencies), /HTTP 401/);
+  assert.equal(f.outputs.failed, '1');
+  assert.ok(!JSON.stringify(f.logs).includes('secret-key'));
+});
+
+test('summary failure does not fail successful uploads; output failure is reported separately', async t => {
+  const f = await fixture(t);
+  f.dependencies.appendSummary = async () => { throw new Error('disk'); };
+  await run(f.env, f.dependencies);
+  assert.equal(f.outputs.pushed, '2');
+  const g = await fixture(t);
+  g.dependencies.output = () => { throw new Error('disk'); };
+  await assert.rejects(run(g.env, g.dependencies), /outputs could not be written/);
+  assert.equal(g.calls.length, 3);
+});
+
+test('batch and per-attempt diagnostics retain retry causes, statuses, sizes, and timing', async t => {
+  const f = await fixture(t);
+  sequence(f, [503, 201, 201]);
+  await run(f.env, f.dependencies);
+  const result = f.results()[0];
+  assert.equal(result.sizeBytes, Buffer.byteLength('bytes:Example.1.0.0.nupkg'));
+  assert.equal(result.durationMs, 5000);
+  assert.equal(result.httpStatus, 201);
+  assert.equal(result.attemptDetails[0].httpStatus, 503);
+  assert.equal(result.attemptDetails[0].retryDelayMs, 5000);
+  assert.equal(f.outputs['duration-seconds'], '5.000');
 });
