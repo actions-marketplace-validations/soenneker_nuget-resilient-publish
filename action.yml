@@ -28,6 +28,9 @@ inputs:
   skip-duplicate:
     description: Accept HTTP 409 as an existing package or symbols already processing.
     default: 'true'
+  log-responses:
+    description: Log sanitized error messages and selected diagnostic response headers. Successful response bodies are never logged.
+    default: 'false'
   max-retries:
     description: Additional attempts per request (0-10). Permanent errors are not retried.
     default: '3'

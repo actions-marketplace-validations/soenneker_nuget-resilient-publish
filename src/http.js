@@ -1,6 +1,7 @@
 'use strict';
 const { setTimeout: sleep } = require('node:timers/promises');
 const { send } = require('./transport');
+const { responseHeaders, readErrorMessage } = require('./diagnostics');
 
 function retryDelay(header, attempt, random = Math.random, now = Date.now()) {
   const value = header?.trim();
@@ -49,12 +50,16 @@ async function request(url, makeOptions, context, { json = false, item } = {}) {
     const started = now();
     let response;
     let body;
+    let diagnosticMessage;
+    const secrets = [config.apiKey].filter(Boolean);
+    const attemptSignal = AbortSignal.any([signal, controller.signal]);
     let failure;
     let phase = 'connection';
     if (item) item.attempts++;
     try {
-      response = await fetchImpl(url, { ...options, redirect: 'manual', onPhase: value => { phase = value; }, signal: AbortSignal.any([signal, controller.signal]) });
+      response = await fetchImpl(url, { ...options, redirect: 'manual', onPhase: value => { phase = value; }, signal: attemptSignal });
       if (json && response.ok) body = await response.text();
+      else if (!response.ok && config.logResponses) diagnosticMessage = await readErrorMessage(response, secrets, attemptSignal);
       else {
         try { await response.body?.cancel(); } catch { /* A definitive HTTP response remains authoritative. */ }
       }
@@ -62,6 +67,14 @@ async function request(url, makeOptions, context, { json = false, item } = {}) {
     finally { clearTimeout(timer); }
     if (signal.aborted) failure = { reason: 'canceled', retryable: false };
     const reason = failure?.reason || `HTTP ${response.status}`;
+    const durationMs = Math.max(0, now() - started);
+    const label = item ? item.file : 'Service index';
+    info(`${label}: attempt ${attempt + 1}/${config.retries + 1} completed in ${durationMs}ms (${reason}).`);
+    if (config.logResponses && response && !response.ok) {
+      const details = responseHeaders(response, secrets);
+      if (diagnosticMessage) details.message = diagnosticMessage;
+      if (Object.keys(details).length) info(`${label}: response diagnostics ${JSON.stringify(details)}`);
+    }
     if (item) {
       item.reason = reason;
       item.httpStatus = failure ? undefined : response.status;

@@ -94,3 +94,26 @@ test('an early server rejection remains authoritative during a streaming upload'
   assert.equal(response.status, 401);
   await response.body.cancel();
 });
+
+
+test('native HTTPS errors expose bounded sanitized diagnostics', async t => {
+  const { request } = require('../src/http');
+  const logs = [];
+  const url = await server(t, (req, res) => {
+    res.writeHead(403, { 'content-type': 'application/json', 'x-request-id': 'native-request-123' });
+    res.end(JSON.stringify({ message: 'Permission denied for native-secret' }));
+  });
+  await assert.rejects(request(url, async () => ({}), {
+    config: { logResponses: true, retries: 0, timeout: 2000, apiKey: 'native-secret' }, signal: new AbortController().signal,
+    info: message => logs.push(message)
+  }), /HTTP 403/);
+  assert.match(logs.join(' '), /Permission denied/);
+  assert.match(logs.join(' '), /native-request-123/);
+  assert.ok(!logs.join(' ').includes('native-secret'));
+});
+
+test('native transport supports the smaller diagnostic size cap', async t => {
+  const url = await server(t, (req, res) => res.end('x'.repeat(8193)));
+  const response = await send(url, { signal: AbortSignal.timeout(2000) });
+  await assert.rejects(response.text(8192), /size limit/);
+});

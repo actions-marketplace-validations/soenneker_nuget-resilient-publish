@@ -17,12 +17,12 @@ function send(url, options) {
         ok: response.statusCode >= 200 && response.statusCode < 300,
         headers: { get: name => response.headers[name.toLowerCase()] ?? null },
         body: { cancel: async () => response.destroy() },
-        text: async () => {
+        text: async (maximumBytes = 1024 * 1024) => {
           const chunks = [];
           let length = 0;
           for await (const chunk of response) {
             length += chunk.length;
-            if (length > 1024 * 1024) {
+            if (length > maximumBytes) {
               response.destroy();
               const error = new Error('Service index exceeded the size limit.');
               error.code = 'ERR_INDEX_TOO_LARGE';

@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: action-release-${{ github.sha }}
+  group: action-release
   cancel-in-progress: false
 jobs:
   test:
