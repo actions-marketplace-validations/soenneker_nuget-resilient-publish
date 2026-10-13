@@ -301,6 +301,13 @@ test('fatal rejection stops new workers but awaits and records in-flight success
   const gate = new Promise(resolve => { releaseB = resolve; });
   let bStarted;
   const ready = new Promise(resolve => { bStarted = resolve; });
+  let rejectionRecorded;
+  const rejected = new Promise(resolve => { rejectionRecorded = resolve; });
+  const originalInfo = f.dependencies.info;
+  f.dependencies.info = message => {
+    originalInfo(message);
+    if (message.startsWith('A.nupkg: Upload/request failed (HTTP 403)')) rejectionRecorded();
+  };
   f.dependencies.fetch = async (url, options) => {
     const response = await original(url, options);
     if (!options.method) return response;
@@ -314,9 +321,14 @@ test('fatal rejection stops new workers but awaits and records in-flight success
   };
   const promise = run(f.env, f.dependencies);
   await ready;
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(f.outputs.results, undefined);
-  releaseB();
+  // B may finish reading its file before A has even returned its rejection.
+  // Keep B in flight until the fatal response has actually stopped the pool.
+  try {
+    await rejected;
+    assert.equal(f.outputs.results, undefined);
+  } finally {
+    releaseB();
+  }
   await assert.rejects(promise, /HTTP 403/);
   assert.deepEqual(f.results().map(r => r.status), ['failed', 'pushed', 'skipped']);
   assert.equal(f.calls.length, 3);
