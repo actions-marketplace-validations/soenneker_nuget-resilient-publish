@@ -188,3 +188,13 @@ test('active attempt logs bytes, phase and timeout and records progress in resul
   await result;
   assert.equal(item.attemptDetails[0].bytesSent, 123);
 });
+
+
+test('HTTP failures always emit diagnostics even without headers or a body', async () => {
+  const logs = [];
+  const ctx = context({ config: { retries: 0, timeout: 1000, logResponses: true }, info: line => logs.push(line), fetch: async () => new Response(null, { status: 500 }) });
+  await assert.rejects(request('https://feed.example', async () => ({}), ctx), /HTTP 500/);
+  const log = logs.find(line => line.includes('response diagnostics'));
+  assert.match(log, /"httpStatus":500/);
+  assert.match(log, /"bodyStatus":"empty"/);
+});

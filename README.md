@@ -127,3 +127,10 @@ Custom sources must expose an anonymously readable V3 index and authenticate upl
 On self-hosted runners, Node's TLS trust can be extended using `NODE_EXTRA_CA_CERTS`. To use environment proxies on a compatible Node 24 runner, configure `NODE_USE_ENV_PROXY=1` together with `HTTPS_PROXY` and `NO_PROXY` before the action process starts. TLS certificate verification remains enabled.
 
 Protocol references: [package publishing](https://learn.microsoft.com/en-us/nuget/api/package-publish-resource), [symbol publishing](https://learn.microsoft.com/en-us/nuget/api/symbol-package-publish-resource).
+
+With `log-responses` enabled, every HTTP failure emits a diagnostic summary with
+`httpStatus` and `bodyStatus`, even when no diagnostic headers or message exist.
+JSON error messages (including problem-detail fields) and plain-text errors are
+sanitized and limited to 512 characters after reading at most 8192 bytes. Empty,
+unsupported (including HTML), oversized, malformed JSON, unreadable, and timed-out
+bodies are identified explicitly. Successful response bodies are never logged.

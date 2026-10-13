@@ -238,7 +238,8 @@ test('response body and raw transport errors cannot disclose credentials in resu
   };
   await assert.rejects(run(f.env, f.dependencies));
   assert.ok(!JSON.stringify(f.outputs).includes('secret-key'));
-  assert.ok(!JSON.stringify(f.logs).includes('sensitive service response'));
+  assert.ok(!JSON.stringify(f.logs).includes('secret-key'));
+  assert.ok(JSON.stringify(f.logs).includes('sensitive service response'));
 });
 
 test('required packages validate exact filenames and versions before network access', async t => {

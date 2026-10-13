@@ -117,9 +117,8 @@ async function requestCore(url, makeOptions, context, { json = false, item } = {
     const durationMs = Math.max(0, now() - started);
     info(`${label}: attempt ${attempt + 1}/${config.retries + 1} completed in ${durationMs}ms (${reason}).`);
     if (config.logResponses && response && !response.ok) {
-      const details = responseHeaders(response, secrets);
-      if (diagnosticMessage) details.message = diagnosticMessage;
-      if (Object.keys(details).length) info(`${label}: response diagnostics ${JSON.stringify(details)}`);
+      const details = { httpStatus: response.status, ...responseHeaders(response, secrets), ...(diagnosticMessage || { bodyStatus: 'unavailable' }) };
+      info(`${label}: response diagnostics ${JSON.stringify(details)}`);
     }
     if (item) {
       item.reason = reason;

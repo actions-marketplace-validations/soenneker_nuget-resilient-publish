@@ -29,7 +29,7 @@ inputs:
     description: Accept HTTP 409 as an existing package or symbols already processing.
     default: 'true'
   log-responses:
-    description: Log sanitized error messages and selected diagnostic response headers. Successful response bodies are never logged.
+    description: Log HTTP failure summaries, body-read status, sanitized JSON or plain-text error excerpts, and selected headers. Successful response bodies are never logged.
     default: 'true'
   max-retries:
     description: Additional attempts per request (0-10). Permanent errors are not retried.
