@@ -124,12 +124,12 @@ test('stalled diagnostic read does not retry an authentication failure', async (
 });
 
 
-test('response logging defaults off, validates input, and avoids reading error bodies when disabled', async () => {
+test('response logging defaults on, validates input, and avoids reading error bodies when disabled', async () => {
   const { settings } = require('../src/settings');
-  assert.equal(settings({ NUGET_API_KEY: 'key' }).logResponses, false);
+  assert.equal(settings({ NUGET_API_KEY: 'key' }).logResponses, true);
   assert.equal(settings({ NUGET_API_KEY: 'key', 'INPUT_LOG-RESPONSES': 'true' }).logResponses, true);
   assert.throws(() => settings({ NUGET_API_KEY: 'key', 'INPUT_LOG-RESPONSES': 'yes' }), /log-responses/);
-  for (const logResponses of [undefined, false]) {
+  for (const logResponses of [settings({ NUGET_API_KEY: 'key', 'INPUT_LOG-RESPONSES': 'false' }).logResponses]) {
     const logs = [];
     const ctx = context({ config: { retries: 0, timeout: 100, logResponses }, info: message => logs.push(message),
       fetch: async () => ({ ok: false, status: 403, headers: new Headers({ 'x-request-id': 'private-id' }),

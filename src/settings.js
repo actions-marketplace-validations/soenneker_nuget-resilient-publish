@@ -35,7 +35,7 @@ function settings(env) {
   if (requireSymbols && !symbols) throw new Error('require-symbols cannot be true when include-symbols is false.');
   return {
     apiKey,
-    logResponses: boolean(get('log-responses'), false, 'log-responses'),
+    logResponses: boolean(get('log-responses'), true, 'log-responses'),
     patterns: (get('packages') || 'artifacts/*.nupkg').split(/\r?\n/).map(p => p.trim()).filter(Boolean),
     source: httpsUrl(get('source') || 'https://api.nuget.org/v3/index.json', 'source'),
     symbols,

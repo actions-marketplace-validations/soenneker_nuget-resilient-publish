@@ -30,7 +30,7 @@ inputs:
     default: 'true'
   log-responses:
     description: Log sanitized error messages and selected diagnostic response headers. Successful response bodies are never logged.
-    default: 'false'
+    default: 'true'
   max-retries:
     description: Additional attempts per request (0-10). Permanent errors are not retried.
     default: '3'
