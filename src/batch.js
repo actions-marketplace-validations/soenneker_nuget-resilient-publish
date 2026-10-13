@@ -1,13 +1,19 @@
 'use strict';
 
+const { endpoint } = require('./endpoint');
 const { setTimeout: sleep } = require('node:timers/promises');
 
-function coordination({ signal, now = Date.now, sleep: wait = (ms, abort) => sleep(ms, undefined, { signal: abort }) }) {
+function coordination({ signal, now = Date.now, sleep: wait = (ms, abort) => sleep(ms, undefined, { signal: abort }), info }) {
+  const endpoints = new Map();
   let until = 0;
   let stopped = false;
   const stopController = new AbortController();
   const waitSignal = AbortSignal.any([signal, stopController.signal]);
   return {
+    endpoint(key) {
+      if (!endpoints.has(key)) endpoints.set(key, endpoint({ signal: waitSignal, now, sleep: wait, info }));
+      return endpoints.get(key);
+    },
     get stopped() { return stopped; },
     set stopped(value) { stopped = value; if (value) stopController.abort(); },
     waitSignal,

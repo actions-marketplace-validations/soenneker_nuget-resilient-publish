@@ -371,3 +371,14 @@ test('batch and per-attempt diagnostics retain retry causes, statuses, sizes, an
   assert.equal(result.attemptDetails[0].retryDelayMs, 5000);
   assert.equal(f.outputs['duration-seconds'], '5.000');
 });
+
+
+test('persistent endpoint outage skips queued packages and retains partial results', async t => {
+  const f = await fixture(t, ['A.nupkg', 'B.nupkg', 'C.nupkg', 'D.nupkg']);
+  f.env['INPUT_MAX-RETRIES'] = '0';
+  sequence(f, [503, 503, 503]);
+  await assert.rejects(run(f.env, f.dependencies), /artifacts failed/);
+  assert.deepEqual(f.results().map(item => item.status), ['failed', 'failed', 'failed', 'skipped']);
+  assert.equal(f.results()[3].attempts, 0);
+  assert.match(f.results()[3].error, /Endpoint/);
+});

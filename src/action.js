@@ -28,7 +28,7 @@ async function run(env = process.env, dependencies = {}) {
   process.once('SIGTERM', cancel);
   const timer = setTimeout(cancel, config.totalTimeout);
   const signal = dependencies.signal ? AbortSignal.any([controller.signal, dependencies.signal]) : controller.signal;
-  const control = coordination({ ...dependencies, signal, now });
+  const control = coordination({ ...dependencies, signal, now, info });
   const context = { ...dependencies, config, signal, info, control };
   let items = [];
   let failure;
@@ -72,8 +72,8 @@ async function run(env = process.env, dependencies = {}) {
         }, context, { item });
         info(`${item.file}: ${item.status} (${item.attempts} attempt(s)).`);
       } catch (error) {
-        item.status = 'failed';
-        item.error = /^(Upload\/request failed|Retry-After|Publishing canceled)/.test(error.message)
+        item.status = error.endpointUnavailable ? 'skipped' : 'failed';
+        item.error = error.endpointUnavailable ? 'Endpoint recovery failed; this artifact was not uploaded.' : /^(Upload\/request failed|Retry-After|Publishing canceled)/.test(error.message)
           ? error.message : 'Unable to read or upload the artifact.';
         info(`${item.file}: ${item.error}`);
         if (error.stop || signal.aborted || control.stopped) throw new Error(item.error);

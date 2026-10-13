@@ -138,3 +138,53 @@ test('response logging defaults on, validates input, and avoids reading error bo
     assert.ok(logs.every(log => !log.includes('response diagnostics') && !log.includes('private-id')));
   }
 });
+
+
+test('nested and aggregate transport causes preserve retryability and permanent TLS failures', () => {
+  const { classify } = require('../src/http');
+  const reset = Object.assign(new Error('secret'), { code: 'ECONNRESET' });
+  assert.equal(classify(new TypeError('secret', { cause: reset }), false, 'upload').retryable, true);
+  const aggregate = Object.assign(new AggregateError([reset]), { code: 'GENERIC' });
+  assert.equal(classify(aggregate, false, 'upload').reason, 'ECONNRESET');
+  aggregate.errors.push(Object.assign(new Error('secret'), { code: 'CERT_HAS_EXPIRED' }));
+  assert.equal(classify(aggregate, false, 'upload').reason, 'tls-error');
+  const cycle = new Error('secret'); cycle.cause = cycle;
+  assert.equal(classify(cycle, false, 'upload').retryable, false);
+});
+
+test('jitter scales with the retry delay', () => {
+  assert.equal(retryDelay(null, 0, () => 0.5), 6250);
+  assert.equal(retryDelay(null, 4, () => 0.5), 75000);
+});
+
+test('diagnostic reads stop at two seconds without losing the HTTP rejection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ctx = context({ config: { logResponses: true, retries: 3, timeout: 600000 },
+    fetch: async () => new Response(new ReadableStream({ pull: () => new Promise(() => {}) }), { status: 403, headers: { 'content-type': 'application/json' } }) });
+  const result = request('https://feed.example', async () => ({}), ctx);
+  const rejection = assert.rejects(result, /HTTP 403/);
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(2000);
+  await rejection;
+});
+
+
+test('active attempt logs bytes, phase and timeout and records progress in results', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const logs = [];
+  let complete;
+  const ctx = context({ config: { retries: 0, timeout: 600000 }, info: line => logs.push(line),
+    fetch: async (_url, options) => {
+      options.onPhase('upload'); options.onProgress(123);
+      return new Promise(resolve => { complete = resolve; });
+    } });
+  const item = { file: 'A.nupkg', kind: 'package', attempts: 0 };
+  const result = request('https://feed.example', async () => ({ headers: { 'Content-Length': '500' } }), ctx, { item });
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(15000);
+  assert.ok(logs.join(' ').includes('phase upload; 123/500 request bytes sent by client'));
+  assert.match(logs.join(' '), /timeout 600000ms/);
+  complete(new Response(null, { status: 201 }));
+  await result;
+  assert.equal(item.attemptDetails[0].bytesSent, 123);
+});

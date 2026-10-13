@@ -37,6 +37,15 @@ inputs:
   timeout-seconds:
     description: Full upload attempt timeout (1-1800 seconds), independent for each artifact. Index requests are capped at 30 seconds.
     default: '600'
+  connect-timeout-seconds:
+    description: Maximum time to establish a connection (1-120 seconds).
+    default: '10'
+  upload-idle-timeout-seconds:
+    description: Maximum time without client upload progress (1-1800 seconds).
+    default: '60'
+  response-timeout-seconds:
+    description: Maximum wait for response headers after the upload finishes (1-1800 seconds).
+    default: '120'
   symbol-timeout-seconds:
     description: Full symbol upload attempt timeout (1-1800 seconds). Defaults to timeout-seconds.
   total-timeout-seconds:

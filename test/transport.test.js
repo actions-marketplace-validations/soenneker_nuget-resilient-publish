@@ -117,3 +117,42 @@ test('native transport supports the smaller diagnostic size cap', async t => {
   const response = await send(url, { signal: AbortSignal.timeout(2000) });
   await assert.rejects(response.text(8192), /size limit/);
 });
+
+
+test('connection timer stops a stalled TLS handshake before the full attempt limit', async t => {
+  const net = require('node:net');
+  const sockets = new Set();
+  const instance = net.createServer(socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+  instance.listen(0, '127.0.0.1'); await once(instance, 'listening');
+  t.after(async () => { for (const socket of sockets) socket.destroy(); await new Promise(resolve => instance.close(resolve)); });
+  await assert.rejects(send('https://127.0.0.1:' + instance.address().port, {
+    connectTimeout: 30, signal: AbortSignal.timeout(2000)
+  }), { code: 'CONNECT_TIMEOUT' });
+});
+
+test('response timer begins after upload and stops a silent server', async t => {
+  const url = await server(t, req => req.resume());
+  await assert.rejects(send(url, { method: 'PUT', body: [Buffer.from('data')], responseTimeout: 30,
+    signal: AbortSignal.timeout(2000) }), { code: 'RESPONSE_TIMEOUT' });
+});
+
+test('upload inactivity timeout stops a stalled body producer', async t => {
+  const url = await server(t, req => req.resume());
+  await assert.rejects(send(url, { method: 'PUT', uploadIdleTimeout: 30, signal: AbortSignal.timeout(2000),
+    body: (async function* () { yield Buffer.from('first'); await new Promise(resolve => setTimeout(resolve, 80)); yield Buffer.from('last'); })()
+  }), { code: 'UPLOAD_IDLE_TIMEOUT' });
+});
+
+test('ongoing upload progress resets inactivity timer and reports cumulative client bytes', async t => {
+  const url = await server(t, async (req, res) => { for await (const chunk of req) {} res.writeHead(201); res.end(); });
+  const progress = [];
+  const response = await send(url, { method: 'PUT', uploadIdleTimeout: 100, signal: AbortSignal.timeout(2000),
+    onProgress: bytes => progress.push(bytes),
+    body: (async function* () {
+      for (let i = 0; i < 5; i++) { yield Buffer.alloc(1024); await new Promise(resolve => setTimeout(resolve, 30)); }
+    })()
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(progress, [1024, 2048, 3072, 4096, 5120]);
+  await response.body.cancel();
+});

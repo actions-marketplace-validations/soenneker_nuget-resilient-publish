@@ -1,16 +1,29 @@
 'use strict';
 
 const https = require('node:https');
-const { Readable } = require('node:stream');
+const { Readable, Writable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
 // Native HTTPS avoids fetch's independent headers timeout cutting a long upload short.
 // The caller supplies an abort signal covering connection, upload, and response.
 function send(url, options) {
   return new Promise((resolve, reject) => {
+    let phaseTimer, upload;
+    let responded = false;
+    const clear = () => clearTimeout(phaseTimer);
+    const arm = (ms, code) => {
+      clear();
+      phaseTimer = setTimeout(() => {
+        const error = new Error('Request phase timed out.');
+        error.code = code;
+        request.destroy(error);
+      }, ms);
+    };
     const request = https.request(url, {
-      method: options.method || 'GET', headers: options.headers, signal: options.signal
+      method: options.method || 'GET', headers: options.headers, signal: options.signal, timeout: 0
     }, response => {
+      responded = true;
+      clear();
       options.onPhase?.('response');
       resolve({
         status: response.statusCode,
@@ -34,13 +47,41 @@ function send(url, options) {
         }
       });
     });
-    request.on('error', reject);
+    request.on('error', error => { clear(); upload?.destroy(error); reject(error); });
+    request.on('close', clear);
+    arm(options.connectTimeout ?? 10000, 'CONNECT_TIMEOUT');
     request.on('socket', socket => {
-      if (socket.connecting) socket.once('secureConnect', () => options.onPhase?.('upload'));
-      else options.onPhase?.('upload');
+      const connected = () => {
+        if (responded || request.destroyed) return;
+        options.onPhase?.('upload');
+        arm(options.uploadIdleTimeout ?? 60000, 'UPLOAD_IDLE_TIMEOUT');
+      };
+      if (socket.connecting) socket.once('secureConnect', connected);
+      else connected();
     });
-    request.on('finish', () => options.onPhase?.('response'));
-    if (options.body) pipeline(Readable.from(options.body), request).catch(reject);
+    request.on('finish', () => {
+      if (responded || request.destroyed) return;
+      options.onPhase?.('response');
+      arm(options.responseTimeout ?? 120000, 'RESPONSE_TIMEOUT');
+    });
+    if (options.body) {
+      let bytes = 0;
+      upload = new Writable({
+        write(chunk, encoding, callback) {
+          request.write(chunk, encoding, error => {
+            if (!error && !responded) {
+              bytes += chunk.length;
+              options.onProgress?.(bytes);
+              arm(options.uploadIdleTimeout ?? 60000, 'UPLOAD_IDLE_TIMEOUT');
+            }
+            callback(error);
+          });
+        },
+        final(callback) { request.end(callback); },
+        destroy(error, callback) { if (error) request.destroy(error); callback(error); }
+      });
+      pipeline(Readable.from(options.body), upload).catch(reject);
+    }
     else request.end();
   });
 }

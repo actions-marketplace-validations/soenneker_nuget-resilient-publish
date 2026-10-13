@@ -44,6 +44,9 @@ function settings(env) {
     concurrency: integer(get('concurrency'), 1, 1, 4, 'concurrency'),
     skipDuplicate: boolean(get('skip-duplicate'), true, 'skip-duplicate'),
     retries: integer(get('max-retries'), 3, 0, 10, 'max-retries'),
+    connectTimeout: integer(get('connect-timeout-seconds'), 10, 1, 120, 'connect-timeout-seconds') * 1000,
+    uploadIdleTimeout: integer(get('upload-idle-timeout-seconds'), 60, 1, 1800, 'upload-idle-timeout-seconds') * 1000,
+    responseTimeout: integer(get('response-timeout-seconds'), 120, 1, 1800, 'response-timeout-seconds') * 1000,
     timeout,
     symbolTimeout: integer(get('symbol-timeout-seconds'), timeout / 1000, 1, 1800, 'symbol-timeout-seconds') * 1000,
     totalTimeout: integer(get('total-timeout-seconds'), 3300, 1, 21600, 'total-timeout-seconds') * 1000
